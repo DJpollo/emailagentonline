@@ -1,0 +1,224 @@
+{
+  "id": "codex-gemini-auto-review-manual",
+  "name": "Auto-Review Agent — Manual Test",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "node-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://ojwhukwnuwsusxxunnmj.supabase.co/rest/v1/emails",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qd2h1a3dudXdzdXN4eHVubm1qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxNDkyMjQsImV4cCI6MjA4NzcyNTIyNH0.KUmJyLcdDaeNyksQQOkwqOI4sn3JjoOtvUlGGKpdO7k" },
+            { "name": "Authorization", "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qd2h1a3dudXdzdXN4eHVubm1qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxNDkyMjQsImV4cCI6MjA4NzcyNTIyNH0.KUmJyLcdDaeNyksQQOkwqOI4sn3JjoOtvUlGGKpdO7k" }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "select", "value": "id,sender,subject,body" },
+            { "name": "read", "value": "eq.false" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-fetch-emails",
+      "name": "Fetch Unread Emails",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n already splits array items — just build the Gemini payload per email\n// so special characters in email body don't break the JSON\nconst items = $input.all();\nconst results = [];\n\nconst systemPrompt = \"You are an AI approval agent for an organization. Analyze the email and respond with ONLY a valid JSON object — no markdown, no code fences, no explanation. Required fields: title (string max 80 chars), category (one of exactly: Room Booking, Club Permission, IT Access, Budget Approval, Event Approval, Other), department (string, guess from context or Unknown), urgency (one of: low, normal, high, critical), risk_score (number 0-100), risk_level (one of: low, medium, high — low=0-34 medium=35-69 high=70-100), ai_summary (2-3 sentence summary), key_points (array of up to 5 strings), sentiment (one of: positive, neutral, negative), ai_recommendation (one of: auto_approve, review, escalate), ai_confidence (number 0-100), action_required (boolean)\";\n\nfor (const item of items) {\n  const email = item.json;\n  if (!email.id || !email.sender) continue;\n\n  const payload = {\n    systemInstruction: {\n      parts: [{ text: systemPrompt }]\n    },\n    contents: [\n      {\n        parts: [\n          {\n            text: \"Analyze this email:\\nFrom: \" + email.sender + \"\\nSubject: \" + (email.subject || '') + \"\\nBody: \" + (email.body || '')\n          }\n        ]\n      }\n    ],\n    generationConfig: {\n      responseMimeType: \"application/json\",\n      temperature: 0.2\n    }\n  };\n\n  results.push({\n    json: {\n      email_id: email.id,\n      sender: email.sender,\n      subject: email.subject,\n      body: email.body,\n      gemini_payload: JSON.stringify(payload)\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "node-build-payload",
+      "name": "Build Gemini Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "x-goog-api-key", "value": "AIzaSyAjxYkuzE-hg0wBI-Q4NZjXShH_1AOeBx0" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.gemini_payload }}",
+        "options": {}
+      },
+      "id": "node-ollama",
+      "name": "Analyze with Gemini",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const geminiResponse = $input.first().json;\nconst email = $('Build Gemini Payload').first().json;\n\nconst raw = geminiResponse.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('\\n').trim() || '';\n\n// Parse Gemini response safely\nlet ai;\ntry {\n  const clean = raw.replace(/^```json\\n?|^```\\n?|\\n?```$/g, '').trim();\n  ai = JSON.parse(clean);\n} catch (e) {\n  const match = raw.match(/\\{[\\s\\S]*\\}/);\n  try { ai = match ? JSON.parse(match[0]) : null; } catch (e2) { ai = null; }\n  if (!ai) ai = {};\n}\n\n// Validate fields\nconst validCategories = ['Room Booking','Club Permission','IT Access','Budget Approval','Event Approval','Other'];\nconst validUrgency = ['low','normal','high','critical'];\nconst validRecommendations = ['auto_approve','review','escalate'];\nconst validSentiments = ['positive','neutral','negative'];\n\nconst riskScore = Math.min(100, Math.max(0, Number(ai.risk_score) || 50));\n\n// Derive status from risk score + recommendation\nlet status;\nif (ai.ai_recommendation === 'auto_approve' || riskScore < 35) status = 'auto_approved';\nelse if (ai.ai_recommendation === 'escalate' || riskScore >= 70) status = 'escalated';\nelse status = 'pending';\n\n// Always derive risk_level from score to keep it consistent\nlet riskLevel;\nif (riskScore < 35) riskLevel = 'low';\nelse if (riskScore < 70) riskLevel = 'medium';\nelse riskLevel = 'high';\n\nconst recommendation = validRecommendations.includes(ai.ai_recommendation) ? ai.ai_recommendation : 'review';\nconst sentiment = validSentiments.includes(ai.sentiment) ? ai.sentiment : 'neutral';\nconst keyPoints = Array.isArray(ai.key_points) ? ai.key_points : [];\nconst aiSummary = ai.ai_summary || '';\n\nreturn [{\n  json: {\n    // Carry forward for later nodes\n    email_id: email.email_id,\n    sender: email.sender,\n    subject: email.subject,\n    body: email.body,\n    risk_score: riskScore,\n    risk_level: riskLevel,\n    status: status,\n    recommendation: recommendation,\n    ai_summary: aiSummary,\n    key_points: keyPoints,\n    sentiment: sentiment,\n    action_required: Boolean(ai.action_required),\n    ai_confidence: Math.min(100, Math.max(0, Number(ai.ai_confidence) || 50)),\n\n    // request row payload\n    request_payload: JSON.stringify({\n      email_id: email.email_id,\n      title: (ai.title || email.subject || 'Untitled Request').slice(0, 80),\n      category: validCategories.includes(ai.category) ? ai.category : 'Other',\n      description: email.body,\n      department: ai.department || 'Unknown',\n      urgency: validUrgency.includes(ai.urgency) ? ai.urgency : 'normal',\n      requester_name: email.sender.split('@')[0].replace(/[._]/g, ' '),\n      requester_email: email.sender,\n      risk_score: riskScore,\n      risk_level: riskLevel,\n      ai_summary: aiSummary,\n      ai_recommendation: recommendation,\n      ai_confidence: Math.min(100, Math.max(0, Number(ai.ai_confidence) || 50)),\n      status: status\n    }),\n\n    // email_summaries row payload\n    summary_payload: JSON.stringify({\n      email_id: email.email_id,\n      summary: aiSummary,\n      key_points: keyPoints,\n      sentiment: sentiment,\n      action_required: Boolean(ai.action_required)\n    })\n  }\n}];"
+      },
+      "id": "node-parse",
+      "name": "Parse Gemini Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1080, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ojwhukwnuwsusxxunnmj.supabase.co/rest/v1/requests",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qd2h1a3dudXdzdXN4eHVubm1qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxNDkyMjQsImV4cCI6MjA4NzcyNTIyNH0.KUmJyLcdDaeNyksQQOkwqOI4sn3JjoOtvUlGGKpdO7k" },
+            { "name": "Authorization", "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qd2h1a3dudXdzdXN4eHVubm1qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxNDkyMjQsImV4cCI6MjA4NzcyNTIyNH0.KUmJyLcdDaeNyksQQOkwqOI4sn3JjoOtvUlGGKpdO7k" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=representation" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.request_payload }}",
+        "options": {}
+      },
+      "id": "node-save-request",
+      "name": "Save Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1300, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ojwhukwnuwsusxxunnmj.supabase.co/rest/v1/email_summaries",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qd2h1a3dudXdzdXN4eHVubm1qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxNDkyMjQsImV4cCI6MjA4NzcyNTIyNH0.KUmJyLcdDaeNyksQQOkwqOI4sn3JjoOtvUlGGKpdO7k" },
+            { "name": "Authorization", "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qd2h1a3dudXdzdXN4eHVubm1qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxNDkyMjQsImV4cCI6MjA4NzcyNTIyNH0.KUmJyLcdDaeNyksQQOkwqOI4sn3JjoOtvUlGGKpdO7k" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=representation" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $('Parse Gemini Response').first().json.summary_payload }}",
+        "options": {}
+      },
+      "id": "node-save-summary",
+      "name": "Save Email Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1300, 420]
+    },
+    {
+      "parameters": {
+        "jsCode": "const savedRequest = $input.first().json;\nconst parsed = $('Parse Gemini Response').first().json;\n\nconst requestId = Array.isArray(savedRequest) ? savedRequest[0]?.id : savedRequest?.id;\n\nlet action;\nif (parsed.status === 'auto_approved') action = 'auto_approved';\nelse if (parsed.status === 'escalated') action = 'escalated';\nelse action = 'risk_scored';\n\nreturn [{\n  json: {\n    request_id: requestId,\n    email_id: parsed.email_id,\n    action: action,\n    actor_name: 'AI System',\n    notes: 'Risk scored at ' + parsed.risk_score + ' (' + parsed.risk_level + ') — ' + parsed.status,\n    metadata: JSON.stringify({\n      risk_score: parsed.risk_score,\n      risk_level: parsed.risk_level,\n      recommendation: parsed.recommendation,\n      sentiment: parsed.sentiment,\n      status: parsed.status\n    })\n  }\n}];"
+      },
+      "id": "node-build-log",
+      "name": "Build Activity Log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1520, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ojwhukwnuwsusxxunnmj.supabase.co/rest/v1/activity_log",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qd2h1a3dudXdzdXN4eHVubm1qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxNDkyMjQsImV4cCI6MjA4NzcyNTIyNH0.KUmJyLcdDaeNyksQQOkwqOI4sn3JjoOtvUlGGKpdO7k" },
+            { "name": "Authorization", "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qd2h1a3dudXdzdXN4eHVubm1qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxNDkyMjQsImV4cCI6MjA4NzcyNTIyNH0.KUmJyLcdDaeNyksQQOkwqOI4sn3JjoOtvUlGGKpdO7k" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "node-save-log",
+      "name": "Save Activity Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1740, 300]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://ojwhukwnuwsusxxunnmj.supabase.co/rest/v1/emails?id=eq.{{ $('Parse Gemini Response').first().json.email_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qd2h1a3dudXdzdXN4eHVubm1qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxNDkyMjQsImV4cCI6MjA4NzcyNTIyNH0.KUmJyLcdDaeNyksQQOkwqOI4sn3JjoOtvUlGGKpdO7k" },
+            { "name": "Authorization", "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qd2h1a3dudXdzdXN4eHVubm1qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxNDkyMjQsImV4cCI6MjA4NzcyNTIyNH0.KUmJyLcdDaeNyksQQOkwqOI4sn3JjoOtvUlGGKpdO7k" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{ \"read\": true }",
+        "options": {}
+      },
+      "id": "node-mark-read",
+      "name": "Mark Email as Read",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1960, 300]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{ "node": "Fetch Unread Emails", "type": "main", "index": 0 }]]
+    },
+    "Fetch Unread Emails": {
+      "main": [[{ "node": "Build Gemini Payload", "type": "main", "index": 0 }]]
+    },
+    "Build Gemini Payload": {
+      "main": [[{ "node": "Analyze with Gemini", "type": "main", "index": 0 }]]
+    },
+    "Analyze with Gemini": {
+      "main": [[{ "node": "Parse Gemini Response", "type": "main", "index": 0 }]]
+    },
+    "Parse Gemini Response": {
+      "main": [[
+        { "node": "Save Request", "type": "main", "index": 0 },
+        { "node": "Save Email Summary", "type": "main", "index": 0 }
+      ]]
+    },
+    "Save Request": {
+      "main": [[{ "node": "Build Activity Log", "type": "main", "index": 0 }]]
+    },
+    "Build Activity Log": {
+      "main": [[{ "node": "Save Activity Log", "type": "main", "index": 0 }]]
+    },
+    "Save Activity Log": {
+      "main": [[{ "node": "Mark Email as Read", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "tags": [],
+  "versionId": "1"
+}

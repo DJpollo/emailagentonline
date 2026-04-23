@@ -1,0 +1,12 @@
+.DS_Store
+auto-review-agent/.n8n-local/
+.env
+env
+.env.local
+# Ignore downloaded skill repos
+*-skill/
+skills-repos/
+external-skills/
+
+# (optional) if you store them somewhere else
+downloads/

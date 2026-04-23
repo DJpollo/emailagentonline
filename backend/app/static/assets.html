@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Asset Import · Email Agent</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/assets.css" />
+</head>
+<body>
+  <div class="aurora"></div>
+  <main class="container">
+
+    <header class="hero">
+      <div class="hero-top">
+        <div>
+          <h1>📦 Asset Import</h1>
+          <p>Upload a CSV to add assets to the database in bulk.</p>
+        </div>
+        <a href="/frontend" class="back-link">← Back to emails</a>
+      </div>
+      <div class="actions">
+        <button id="downloadBtn">⬇ Download Template</button>
+      </div>
+    </header>
+
+    <!-- Column guide -->
+    <div class="col-guide">
+      <span class="col-pill">name <em>required</em></span>
+      <span class="col-pill">category <em>required</em></span>
+      <span class="col-pill">quantity <em>number</em></span>
+      <span class="col-pill">available <em>true/false</em></span>
+      <span class="col-pill">notes <em>optional</em></span>
+    </div>
+
+    <!-- Drop zone -->
+    <div id="dropZone" class="drop-zone">
+      <input type="file" id="fileInput" accept=".csv" hidden />
+      <div class="drop-icon">☁</div>
+      <p class="drop-main">Drop your CSV here or <span class="drop-link">click to browse</span></p>
+      <p class="drop-sub">Only .csv files accepted</p>
+    </div>
+
+    <!-- Error box -->
+    <div id="errorBox" class="error-box hidden"></div>
+
+    <!-- Preview -->
+    <section id="previewSection" class="hidden">
+      <div class="preview-header">
+        <span id="previewCount" class="preview-count"></span>
+        <button id="clearBtn" class="clear-btn">Clear</button>
+      </div>
+      <div class="table-wrap">
+        <table id="previewTable">
+          <thead>
+            <tr>
+              <th>name</th><th>category</th><th>qty</th><th>available</th><th>notes</th>
+            </tr>
+          </thead>
+          <tbody id="previewBody"></tbody>
+        </table>
+      </div>
+      <button id="importBtn" class="import-btn">Import assets →</button>
+    </section>
+
+    <!-- Uploading spinner -->
+    <div id="uploadingBox" class="uploading-box hidden">
+      <div class="spinner"></div>
+      <p>Uploading to Supabase…</p>
+    </div>
+
+    <!-- Success -->
+    <div id="successBox" class="result-box success-box hidden">
+      <div class="result-icon">✓</div>
+      <p class="result-title" id="successMsg"></p>
+      <p class="result-sub">Assets are now in the database and will be checked by the workflow.</p>
+      <button id="importMoreBtn">Import more</button>
+    </div>
+
+    <!-- Upload error -->
+    <div id="uploadErrorBox" class="result-box upload-error-box hidden">
+      <div class="result-icon">✕</div>
+      <p class="result-title">Upload failed</p>
+      <p class="result-sub" id="uploadErrorMsg"></p>
+      <button id="retryBtn">Try again</button>
+    </div>
+
+  </main>
+  <script src="/static/assets.js"></script>
+</body>
+</html>

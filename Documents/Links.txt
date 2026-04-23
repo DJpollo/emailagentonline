@@ -1,0 +1,3 @@
+Jira: https://utdallas-team9-4485-26f.atlassian.net/jira/software/projects/SCRUM/boards/1
+Google AI Studio Backend: https://ai.studio/apps/58458a7f-5bec-4864-83b1-569ca2477e82
+Specs doc: https://docs.google.com/document/d/1dJ3vxY_heqqfZMJYj38kfDjvPYvoLlIr/edit

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Email Agent Reader UI</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="aurora"></div>
+  <main class="container">
+    <header class="hero">
+      <h1>📬 Email Agent Reader</h1>
+      <p>Colorful inbox dashboard powered by FastAPI + Supabase.</p>
+      <div class="actions">
+        <button id="refreshBtn">Refresh Emails</button>
+        <a href="/assets/upload">
+          <button type="button">📦 Import Assets</button>
+        </a>
+      </div>
+    </header>
+    <section class="status" id="status">Click "Refresh Emails" to load data.</section>
+    <section id="emailGrid" class="email-grid"></section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
